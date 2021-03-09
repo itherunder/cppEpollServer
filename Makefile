@@ -5,5 +5,9 @@ cc = g++
 exe=server
 
 
-server: main.cpp
-	$(cc) -o server main.cpp
+server: server.cpp
+	$(cc) -o server server.cpp
+
+client: client.cpp
+	$(cc) -o client client.cpp
+	

@@ -3,6 +3,7 @@ C++实现一个epoll的简单应用
 
 抄自[epoll小demo](https://github.com/Leosocy/epoll-example)，尝试用C++11新特性重写，未果
 `TODO: runtime_error("bind to serv_ip port failed.")`
+再抄自[IO多路复用：select、poll、epoll示例](https://blog.csdn.net/lisonglisonglisong/article/details/51328062)，这个写得比较简单了，也比较清晰
 
 # 原readme
 # 学习epoll源码后写此项目加深印象

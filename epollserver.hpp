@@ -206,4 +206,147 @@ public:
     }
 };
 
+#define BUFFER_SIZE 1024
+#define EPOLLSIZE 100
+
+struct PACKET_HEAD {
+    int length;
+};
+
+class Server {
+private:
+    struct sockaddr_in _server_addr;
+    socklen_t _server_addr_len;
+    int _listen_fd;
+    int _epfd;
+    struct epoll_event _events[EPOLLSIZE];
+
+public:
+    Server(int port) {
+        memset(&_server_addr, 0, sizeof(_server_addr));
+        _server_addr.sin_family = AF_INET;
+        // _server_addr.sin_addr.s_addr = "0.0.0.0";
+        _server_addr.sin_addr.s_addr = htons(INADDR_ANY);
+        _server_addr.sin_port = htons(port);
+        // create socket to listen
+        _listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (_listen_fd < 0) {
+            cout << "create socket failed.";
+            exit(-1);
+        }
+        int opt = 1;
+        setsockopt(_listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    }
+
+    ~Server() {
+        close(_epfd);
+    }
+
+    void Bind() {
+        if (-1 == bind(_listen_fd, (struct sockaddr*)&_server_addr, sizeof(_server_addr))) {
+            cout << "server bind failed.";
+            exit(-1);
+        }
+        cout << "bind successfully." << endl;
+    }
+
+    void Listen(int queue_len = 20) {
+        if (-1 == listen(_listen_fd, queue_len)) {
+            cout << "server listen failed.";
+            exit(-1);
+        }
+        cout << "listen successfully." << endl;
+    }
+
+    void Accept() {
+        struct sockaddr_in client_addr;
+        socklen_t client_addr_len = sizeof(client_addr);
+
+        int conn_fd = accept(_listen_fd, (struct sockaddr*)&client_addr, &client_addr_len);
+        if (conn_fd < 0) {
+            cout << "server accept failed.";
+            exit(-1);
+        }
+        cout << "new connection was accepted." << endl;
+
+        // register in epoll
+        struct epoll_event ev;
+        ev.data.fd = conn_fd;
+        ev.events = EPOLLIN;
+
+        epoll_ctl(_epfd, EPOLL_CTL_ADD, conn_fd, &ev);
+    }
+
+    void Recv(int fd) {
+        bool close_conn = false;
+
+        PACKET_HEAD head;
+        // 先接受包头，即数据总长度
+        recv(fd, &head, sizeof(head), 0);
+
+        char* buffer = new char[head.length];
+        memset(buffer, 0, head.length);
+        int tot = 0;
+        while (tot < head.length) {
+            int len = recv(fd, buffer + tot, head.length - tot, 0);
+            if (len < 0) {
+                cout << "recv() error." << endl;
+                close_conn = true;
+                break;
+            }
+            tot += len;
+        }
+
+        // echo back to client
+        if (tot == head.length) {
+            int ret1 = send(fd, &head, sizeof(head), 0);
+            int ret2 = send(fd, buffer, head.length, 0);
+            if (ret1 < 1 || ret2 < 1) {
+                cout << "send() error." << endl;
+                close_conn = true;
+            }
+        }
+
+        delete buffer;
+
+        if (close_conn) {
+            close(fd);
+            struct epoll_event ev;
+            ev.data.fd = fd;
+            ev.events = EPOLLIN;
+            epoll_ctl(_epfd, EPOLL_CTL_DEL, fd, &ev); // delete fd
+        }
+    }
+
+    void Run() {
+        // create the epoll fd
+        _epfd = epoll_create(1);
+        
+        struct epoll_event ev;
+        ev.data.fd = _listen_fd;
+        ev.events = EPOLLIN;
+        epoll_ctl(_epfd, EPOLL_CTL_ADD, _listen_fd, &ev);
+
+        while (1) {
+            // -1 means wait forever
+            int nfds = epoll_wait(_epfd, _events, EPOLLSIZE, -1);
+            if (nfds < 0) {
+                cout << "poll() error.";
+                exit(-1);
+            }
+
+            if (nfds == 0)
+                continue;
+            
+            for (int i = 0; i < nfds; ++i) {
+                int fd = _events[i].data.fd;
+                if ((fd == _listen_fd) && (_events[i].events & EPOLLIN))
+                    Accept(); // 有新的请求
+                else
+                    Recv(fd); // 读数据
+            }
+        }
+    }
+};
+
 #endif
